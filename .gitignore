@@ -1,0 +1,11 @@
+# Har tarah ki heavy model aur binary files
+*.safetensors
+*.pta
+*.pt
+*.bin
+
+# Poore ke poore heavy folders ko block karo
+results/
+toxicity_model/
+venv/
+.git/
