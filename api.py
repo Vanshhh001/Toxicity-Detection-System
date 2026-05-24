@@ -53,7 +53,7 @@ def mask_text(text):
         "chutiya",
         "bhenchod",
         "teri maa ka bhosda",
-        "bhen ki chut"
+        "bhen ki chut",
         "madarchod",
         "gandu",
         "randi",
