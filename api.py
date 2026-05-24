@@ -13,10 +13,8 @@ from backend.DB import add_comment
 
 import torch
 
-# ====================================
-# LOAD MODEL
-# ====================================
 
+# LOAD MODEL
 model_path = "toxicity_model"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -25,24 +23,24 @@ model = AutoModelForSequenceClassification.from_pretrained(
     model_path
 )
 
-# ====================================
+
 # FASTAPI APP
-# ====================================
+
 
 app = FastAPI()
 
 templates = Jinja2Templates(directory="templates")
 
-# ====================================
+
 # INPUT MODEL
-# ====================================
+
 
 class Comment(BaseModel):
     text: str
 
-# ====================================
+
 # MASK ABUSIVE WORDS
-# ====================================
+
 
 def mask_text(text):
 
@@ -78,9 +76,7 @@ def mask_text(text):
             )
 
     return masked_text
-# ====================================
-# HOME PAGE
-# ====================================
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -92,10 +88,6 @@ def home(request: Request):
             "request": request
         }
     )
-
-# ====================================
-# API ROUTE
-# ====================================
 
 @app.post("/predict")
 def predict(comment: Comment):
@@ -167,9 +159,9 @@ def predict(comment: Comment):
         "confidence": round(confidence, 2)
     }
 
-# ====================================
+
 # UI ROUTE
-# ====================================
+
 
 @app.post(
     "/predict-ui",
@@ -212,14 +204,14 @@ def predict_ui(
 
     if prediction == 1:
 
-        if confidence > 80:
-            label = "High Toxic"
+       if confidence > 80:
+        label = "High Toxic"
 
-        elif confidence > 60:
-            label = "Medium Toxic"
+       elif confidence > 60:
+        label = "Medium Toxic"
 
-        else:
-            label = "Low Toxic"
+       else:
+        label = "Low Toxic"
 
     else:
         label = "Non-Toxic"
