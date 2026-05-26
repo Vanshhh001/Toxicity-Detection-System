@@ -12,6 +12,9 @@ from transformers import (
 from backend.DB import add_comment
 
 import torch
+import pandas as pd
+
+
 
 
 # LOAD MODEL
@@ -23,6 +26,9 @@ model = AutoModelForSequenceClassification.from_pretrained(
     model_path
 )
 
+abuse_df = pd.read_csv("abuse_words.csv")
+
+abuse_words = abuse_df["word"].tolist()
 
 # FASTAPI APP
 
@@ -39,25 +45,8 @@ class Comment(BaseModel):
     text: str
 
 
-# MASK ABUSIVE WORDS
-
 
 def mask_text(text):
-
-    abuse_words = [
-        "motherfucker",
-        "idiot",
-        "stupid",
-        "chutiya",
-        "bhenchod",
-        "teri maa ka bhosda",
-        "bhen ki chut",
-        "madarchod",
-        "gandu",
-        "randi",
-        "lund",
-        "chut",
-    ]
 
     masked_text = text
 
