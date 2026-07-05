@@ -26,7 +26,7 @@ model = AutoModelForSequenceClassification.from_pretrained(
     model_path
 )
 
-abuse_df = pd.read_csv("abuse_words.csv")
+abuse_df = pd.read_csv("data/abuse_words.csv")
 
 abuse_words = abuse_df["word"].tolist()
 
