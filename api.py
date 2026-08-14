@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-
 from pydantic import BaseModel
+
+from sqlalchemy import create_engine, text
 
 from transformers import (
     AutoTokenizer,
@@ -13,11 +14,31 @@ from backend.DB import add_comment
 
 import torch
 import pandas as pd
+import re
 
 
+# =========================================================
+# FASTAPI APPLICATION
+# =========================================================
+
+app = FastAPI()
+
+templates = Jinja2Templates(directory="templates")
 
 
-# LOAD MODEL
+# =========================================================
+# DATABASE CONNECTION
+# =========================================================
+
+DB_URL = "mysql+pymysql://root:root@localhost/toxicity_db"
+
+engine = create_engine(DB_URL)
+
+
+# =========================================================
+# LOAD YOUR TRAINED BERT MODEL
+# =========================================================
+
 model_path = "toxicity_model"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -26,25 +47,41 @@ model = AutoModelForSequenceClassification.from_pretrained(
     model_path
 )
 
+model.eval()
+print("MODEL LABELS:", model.config.id2label)
+
+# =========================================================
+# LOAD ABUSE WORDS
+# =========================================================
+
 abuse_df = pd.read_csv("data/abuse_words.csv")
 
-abuse_words = abuse_df["word"].tolist()
+abuse_words = (
+    abuse_df["word"]
+    .dropna()
+    .astype(str)
+    .str.strip()
+    .str.lower()
+    .tolist()
+)
 
-# FASTAPI APP
+
+# Sort longest words/phrases first.
+# This helps when one phrase contains another phrase.
+abuse_words.sort(key=len, reverse=True)
 
 
-app = FastAPI()
-
-templates = Jinja2Templates(directory="templates")
-
-
+# =========================================================
 # INPUT MODEL
-
+# =========================================================
 
 class Comment(BaseModel):
     text: str
 
 
+# =========================================================
+# MASK ABUSIVE WORDS
+# =========================================================
 
 def mask_text(text):
 
@@ -52,47 +89,42 @@ def mask_text(text):
 
     for abuse in abuse_words:
 
-        if abuse in masked_text.lower():
+        if not abuse:
+            continue
 
-            masked = (
-                abuse[0]
-                + "*" * (len(abuse) - 1)
-            )
+        # Create stars of the same length
+        masked = "*" * len(abuse)
 
-            masked_text = masked_text.replace(
-                abuse,
-                masked
-            )
+        # Case-insensitive replacement
+        pattern = re.compile(
+            re.escape(abuse),
+            re.IGNORECASE
+        )
+
+        masked_text = pattern.sub(
+            masked,
+            masked_text
+        )
 
     return masked_text
 
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
+# =========================================================
+# BERT TOXICITY PREDICTION
+# =========================================================
 
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {
-            "request": request
-        }
-    )
-
-@app.post("/predict")
-def predict(comment: Comment):
-
-    # Tokenize input
+def predict_toxicity(text):
 
     inputs = tokenizer(
-        comment.text,
+        text,
         return_tensors="pt",
         truncation=True,
         padding=True
     )
 
-    # Model prediction
+    with torch.no_grad():
 
-    outputs = model(**inputs)
+        outputs = model(**inputs)
 
     probabilities = torch.softmax(
         outputs.logits,
@@ -100,7 +132,8 @@ def predict(comment: Comment):
     )
 
     prediction = torch.argmax(
-        probabilities
+        probabilities,
+        dim=1
     ).item()
 
     confidence = (
@@ -108,7 +141,9 @@ def predict(comment: Comment):
         * 100
     )
 
-    # Toxicity level
+    # Your training uses:
+    # 0 = Non-Toxic
+    # 1 = Toxic
 
     if prediction == 1:
 
@@ -122,113 +157,175 @@ def predict(comment: Comment):
             label = "Low Toxic"
 
     else:
+
         label = "Non-Toxic"
 
-    # Mask text
+    return label, round(confidence, 2)
 
-    masked_text = mask_text(comment.text)
 
-    # Save into database
+# =========================================================
+# HOME PAGE
+# =========================================================
 
-    add_comment(
-        platform="website",
-        user="vansh",
-        original=comment.text,
-        cleaned=masked_text,
-        prediction=label,
-        confidence=round(confidence, 2)
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "request": request
+        }
     )
 
-    # Return JSON response
 
+# =========================================================
+# REST API
+# =========================================================
+
+@app.post("/predict")
+def predict(comment: Comment):
+
+    # Original text
+    original_text = comment.text
+
+    # BERT prediction
+    label, confidence = predict_toxicity(
+        original_text
+    )
+
+    # Mask abusive words
+    masked_text = mask_text(
+        original_text
+    )
+
+    # Save to database
+    add_comment(
+        platform="api",
+        user="guest",
+        original=original_text,
+        cleaned=masked_text,
+        prediction=label,
+        confidence=confidence
+    )
+
+    # Return JSON
     return {
-        "original_text": comment.text,
+        "original_text": original_text,
         "masked_text": masked_text,
         "prediction": label,
-        "confidence": round(confidence, 2)
+        "confidence": confidence
     }
 
 
-# UI ROUTE
-
+# =========================================================
+# WEB UI PREDICTION
+# =========================================================
 
 @app.post(
     "/predict-ui",
     response_class=HTMLResponse
 )
-
 def predict_ui(
     request: Request,
     text: str = Form(...)
 ):
 
-    # Tokenize input
-
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True
+    # BERT prediction
+    label, confidence = predict_toxicity(
+        text
     )
 
-    # Model prediction
-
-    outputs = model(**inputs)
-
-    probabilities = torch.softmax(
-        outputs.logits,
-        dim=1
-    )
-
-    prediction = torch.argmax(
-        probabilities
-    ).item()
-
-    confidence = (
-        probabilities[0][prediction].item()
-        * 100
-    )
-
-    # Toxicity level
-
-    if prediction == 1:
-
-       if confidence > 80:
-        label = "High Toxic"
-
-       elif confidence > 60:
-        label = "Medium Toxic"
-
-       else:
-        label = "Low Toxic"
-
-    else:
-        label = "Non-Toxic"
-
-    # Mask text
-
+    # Mask abusive words
     masked_text = mask_text(text)
 
-    # Save into database
-
+    # Save to database
     add_comment(
         platform="website",
         user="vansh",
         original=text,
         cleaned=masked_text,
         prediction=label,
-        confidence=round(confidence, 2)
+        confidence=confidence
     )
 
-    # Return HTML page
-
+    # Show result on web page
     return templates.TemplateResponse(
-    request,
-    "index.html",
-    {
-        "request": request,
-        "prediction": label,
-        "confidence": round(confidence, 2),
-        "masked_text": masked_text
-    }
-)
+        request,
+        "index.html",
+        {
+            "request": request,
+            "prediction": label,
+            "confidence": confidence,
+            "masked_text": masked_text
+        }
+    )
+
+
+# =========================================================
+# HISTORY
+# =========================================================
+
+@app.get("/history")
+def history():
+
+    with engine.connect() as conn:
+
+        result = conn.execute(
+            text("""
+                SELECT
+                    id,
+                    original_text,
+                    cleaned_text,
+                    created_at
+                FROM comments
+                ORDER BY id DESC
+                LIMIT 20
+            """)
+        )
+
+        rows = []
+
+        for row in result:
+
+            rows.append({
+                "id": row[0],
+                "original": row[1],
+                "cleaned": row[2],
+                "time": str(row[3])
+            })
+
+        return rows
+
+
+# =========================================================
+# STATISTICS
+# =========================================================
+
+@app.get("/stats")
+def stats():
+
+    with engine.connect() as conn:
+
+        total = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM comments
+            """)
+        ).scalar()
+
+        toxic = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM comments
+                WHERE original_text != cleaned_text
+            """)
+        ).scalar()
+
+        clean = total - toxic
+
+        return {
+            "total": total,
+            "toxic": toxic,
+            "clean": clean
+        }
