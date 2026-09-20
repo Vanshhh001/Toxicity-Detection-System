@@ -5,7 +5,7 @@ from transformers import AutoTokenizer
 from transformers import AutoModelForSequenceClassification
 from transformers import Trainer, TrainingArguments
 from datasets import Dataset
-
+                                        
 # Load dataset
 df = pd.read_csv("data/toxic_data.csv")
 

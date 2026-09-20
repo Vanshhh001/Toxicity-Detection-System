@@ -15,6 +15,7 @@ from backend.DB import add_comment
 import torch
 import pandas as pd
 import re
+import os
 
 
 # =========================================================
@@ -30,10 +31,14 @@ templates = Jinja2Templates(directory="templates")
 # DATABASE CONNECTION
 # =========================================================
 
-DB_URL = "mysql+pymysql://root:root@localhost/toxicity_db"
+# DATABASE CONNECTION
+
+DB_URL = os.getenv(
+    "DATABASE_URL",
+    "mysql+pymysql://root:root@localhost/toxicity_db"
+)
 
 engine = create_engine(DB_URL)
-
 
 # =========================================================
 # LOAD YOUR TRAINED BERT MODEL
